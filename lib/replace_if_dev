@@ -1,0 +1,214 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+
+// Routes
+import 'routes.dart';
+
+class TestMap extends StatefulWidget {
+  const TestMap({super.key});
+
+  @override
+  State<TestMap> createState() => _TestMapState();
+}
+
+class _TestMapState extends State<TestMap> {
+  final MapController _mapController = MapController();
+
+  // Map boundaries
+  final LatLng swBound = const LatLng(13.0, 120.6);
+  final LatLng neBound = const LatLng(14.2, 121.5);
+
+  // Vehicle position (simulated GPS)
+  LatLng? vehiclePosition;
+
+  // Currently selected route (for dropdown + vehicle)
+  late RouteData selectedRoute;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // Default route
+    selectedRoute = allRouteData.first;
+
+    simulateVehicleMovement();
+  }
+
+  // Simulate vehicle movement along selected route
+  void simulateVehicleMovement() async {
+    for (final point in selectedRoute.coordinates) {
+      await Future.delayed(const Duration(seconds: 2));
+      if (!mounted) return;
+
+      setState(() {
+        vehiclePosition = point;
+      });
+    }
+  }
+
+  // Switch route from dropdown
+  void switchRoute(RouteData route) {
+    setState(() {
+      selectedRoute = route;
+      vehiclePosition = null;
+      _mapController.move(route.coordinates.first, 13);
+      simulateVehicleMovement();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("TransitLink — DEV MAP"),
+        actions: [
+          DropdownButtonHideUnderline(
+            child: DropdownButton<RouteData>(
+              value: selectedRoute,
+              icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white),
+              dropdownColor: Colors.blueAccent,
+              items: allRouteData.map((route) {
+                return DropdownMenuItem<RouteData>(
+                  value: route,
+                  child: Text(
+                    route.name,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                );
+              }).toList(),
+              onChanged: (value) {
+                if (value != null) switchRoute(value);
+              },
+            ),
+          ),
+        ],
+      ),
+
+      body: FlutterMap(
+        mapController: _mapController,
+        options: MapOptions(
+          initialCenter: selectedRoute.coordinates.first,
+          initialZoom: 13,
+          maxZoom: 19,
+
+          // DEV TAP: print coordinates
+          onTap: (tapPos, latlng) {
+            debugPrint(
+              "LatLng(${latlng.latitude}, ${latlng.longitude}),",
+            );
+          },
+
+          onPositionChanged: (position, _) {
+            final center = position.center;
+            double lat = center.latitude;
+            double lng = center.longitude;
+
+            if (lat < swBound.latitude) lat = swBound.latitude;
+            if (lat > neBound.latitude) lat = neBound.latitude;
+            if (lng < swBound.longitude) lng = swBound.longitude;
+            if (lng > neBound.longitude) lng = neBound.longitude;
+
+            if (lat != center.latitude || lng != center.longitude) {
+              _mapController.move(LatLng(lat, lng), position.zoom);
+            }
+          },
+        ),
+
+        children: [
+          // Base map
+          TileLayer(
+            urlTemplate: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+            userAgentPackageName: 'com.smart_jeep.capstone',
+          ),
+
+          // ALL ROUTES 
+          PolylineLayer(
+            polylines: allRouteData.expand((route) {
+              return List.generate(route.lanes.length, (i) {
+                return Polyline(
+                  points: route.lanes[i],
+                  color: route.laneColors[i],
+                  strokeWidth: 4,
+                  borderColor: Colors.black,
+                  borderStrokeWidth: 2,
+                );
+              });
+            }).toList(),
+          ),
+
+          //  Vehicle marker (only on selected route)
+          if (vehiclePosition != null)
+            MarkerLayer(
+              markers: [
+                Marker(
+                  point: vehiclePosition!,
+                  width: 40,
+                  height: 40,
+                  child: const Icon(
+                    Icons.directions_bus,
+                    color: Colors.green,
+                    size: 36,
+                  ),
+                ),
+              ],
+            ),
+
+          //  Route label (selected route only)
+          MarkerLayer(
+            markers: [
+              Marker(
+                point: selectedRoute
+                    .coordinates[(selectedRoute.coordinates.length / 2).floor()],
+                width: 140,
+                height: 30,
+                child: Container(
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: const Color.fromRGBO(255, 255, 255, 0.85),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: Colors.black54),
+                  ),
+                  child: Text(
+                    selectedRoute.name,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+
+
+//MAIN.DART DO NOT TOUCH
+import 'package:flutter/material.dart';
+import 'test_map.dart';
+import 'gpsint.dart';
+
+void main() {
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'TransitLink',
+      home: const TestMap(), // Change to GPSIntegration() to test Arduino USB
+    );
+  }
+}
+
+
