@@ -75,7 +75,7 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
 
   // Websocket SERVERRR
   void _connectWebSocket() {
-    const serverUrl = 'ws://192.168.55.102:8765'; //HEREEEEEEEEEEEEEEEEEEEEEEEEEE
+    const serverUrl = 'wss://transitlink.onrender.com'; //HEREEEEEEEEEEEEEEEEEEEEEEEEEE
     channel = IOWebSocketChannel.connect(serverUrl);
 
     channel?.stream.listen((message) {
