@@ -1,5 +1,6 @@
 import asyncio
 import websockets
+import os
 
 connected = set()
 
@@ -19,9 +20,9 @@ async def handle_client(websocket):
         print(f"Client disconnected: {websocket.remote_address}")
 
 async def main():
-
-    server = await websockets.serve(handle_client, "0.0.0.0", 8765)
-    print("WebSocket server started on port 8765")
+    port = int(os.environ.get("PORT", 8765))
+    server = await websockets.serve(handle_client, "0.0.0.0", port)
+    print(f"WebSocket server started on port {port}")
     await server.wait_closed()
 
 asyncio.run(main())

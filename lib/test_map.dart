@@ -19,7 +19,7 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
   final MapController _mapController = MapController();
   final Map<String, LatLng> vehicles = {};
   final String vehicleId =
-      "I am not a jeep (jk)"; // LOL CHANGE THIS TO VEHICLE ID OR SOMETHING IN THE FUTURE
+      "Test Unit PANEL"; // LOL CHANGE THIS TO VEHICLE ID OR SOMETHING IN THE FUTURE
   LatLng? vehiclePosition;
   late RouteData selectedRoute;
 
@@ -81,7 +81,7 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
   // Websocket SERVERRR
   void _connectWebSocket() {
     const serverUrl =
-        'wss://smart-jeep-gps.onrender.com'; //HEREEEEEEEEEEEEEEEEEEEEEEEEEE
+        'wss://transitlink.onrender.com'; //HEREEEEEEEEEEEEEEEEEEEEEEEEEE
     channel = IOWebSocketChannel.connect(serverUrl);
 
     channel?.stream.listen(
