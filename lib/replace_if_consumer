@@ -273,7 +273,7 @@ import 'routes.dart';
 import 'dart:async';
 import 'package:web_socket_channel/io.dart';
 
-//CHANGE IP ON LINE 76
+//CHANGE IP ON LINE 81
 
 class TestMap extends StatefulWidget {
   const TestMap({super.key});
@@ -284,11 +284,13 @@ class TestMap extends StatefulWidget {
 
 class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
   final MapController _mapController = MapController();
-
+  final Map<String, LatLng> vehicles = {};
+  final String vehicleId =
+      "I am not a jeep (jk)"; // LOL CHANGE THIS TO VEHICLE ID OR SOMETHING IN THE FUTURE
   LatLng? vehiclePosition;
   late RouteData selectedRoute;
 
-  // Haylayt route 
+  // Haylayt route
   String? highlightedRouteName;
 
   // Animasyon darku daa
@@ -300,13 +302,15 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
   // TRANSMITTER
   IOWebSocketChannel? channel;
   String lastSent = "No coordinates sent yet";
-  bool transmit = true; // Set to true to send GPS coordinates
+  bool transmit = true;
+  bool _hasCenteredOnce = false;
+  DateTime _lastSentTime = DateTime.fromMillisecondsSinceEpoch(0);
 
   @override
   void initState() {
     super.initState();
+    vehicles[vehicleId] = vehiclePosition ?? LatLng(13.9, 121.2); // Default position if GPS is not available
 
-    // Safe selectedRoute setup
     if (allRouteData.isNotEmpty) {
       selectedRoute = allRouteData.first;
     } else {
@@ -342,24 +346,43 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
 
   // Websocket SERVERRR
   void _connectWebSocket() {
-    const serverUrl = 'ws://192.168.55.102:8765'; //HEREEEEEEEEEEEEEEEEEEEEEEEEEE
+    const serverUrl =
+        'wss://transitlink.onrender.com'; //HEREEEEEEEEEEEEEEEEEEEEEEEEEE
     channel = IOWebSocketChannel.connect(serverUrl);
 
-    channel?.stream.listen((message) {
-      debugPrint("Server: $message");
-    }, onError: (error) {
-      debugPrint("WebSocket error: $error");
-    }, onDone: () {
-      debugPrint("WebSocket closed");
-    });
+    channel?.stream.listen(
+      (message) {
+        final parts = message.toString().split(",");
+
+        if (parts.length == 3) {
+          final id = parts[0];
+          final lat = double.tryParse(parts[1]);
+          final lng = double.tryParse(parts[2]);
+
+          if (lat != null && lng != null) {
+            setState(() {
+              vehicles[id] = LatLng(lat, lng);
+            });
+          }
+        }
+      },
+      onError: (error) {
+        debugPrint("WebSocket error: $error");
+      },
+      onDone: () {
+        debugPrint("WebSocket closed");
+      },
+    );
   }
 
   // START GPS UPDATES
-  void _startGpsUpdates() async {
+  void _startGpsUpdates() 
+  async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
       debugPrint("GPS is disabled.");
       return;
+      
     }
 
     LocationPermission permission = await Geolocator.checkPermission();
@@ -370,24 +393,32 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
     if (permission == LocationPermission.deniedForever) return;
 
     // CONTINUE TO UPDATE
-    positionStream = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.best,
-        distanceFilter: 5,
-      ),
-    ).listen((Position pos) {
-      final newPos = LatLng(pos.latitude, pos.longitude);
-      setState(() => vehiclePosition = newPos);
-      _mapController.move(newPos, 16); // optional: auto-center map
+    positionStream =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.best,
+            distanceFilter: 5,
+          ),
+        ).listen((Position pos) {
+          final newPos = LatLng(pos.latitude, pos.longitude);
+          setState(() => vehiclePosition = newPos);
+          if (!_hasCenteredOnce) {
+            _mapController.move(newPos, 16);
+            _hasCenteredOnce = true;
+          }
 
-      // SEND COORDS BLYAD SUKA
-      if (transmit && channel != null) {
-        final coords = "${pos.latitude}/${pos.longitude}";
-        channel?.sink.add(coords);
-        setState(() => lastSent = coords);
-        debugPrint("Sent: $coords");
-      }
-    });
+          // SEND COORDS BLYAD SUKA
+          final now = DateTime.now();
+          if (transmit &&
+              channel != null &&
+              now.difference(_lastSentTime).inSeconds >= 3) {
+            final coords = "$vehicleId,${pos.latitude},${pos.longitude}";
+            channel?.sink.add(coords);
+            setState(() => lastSent = coords);
+            _lastSentTime = now;
+            debugPrint("Sent: $coords");
+          }
+        });
   }
 
   void switchRoute(RouteData route) {
@@ -399,15 +430,19 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
     });
   }
 
-  bool _isNearPolyline(LatLng tap, List<LatLng> polyline,
-      {double threshold = 0.0006}) {
+  bool _isNearPolyline(
+    LatLng tap,
+    List<LatLng> polyline, {
+    double threshold = 0.0006,
+  }) {
     for (int i = 0; i < polyline.length - 1; i++) {
       final p1 = polyline[i];
       final p2 = polyline[i + 1];
       final dx = p2.longitude - p1.longitude;
       final dy = p2.latitude - p1.latitude;
       if (dx == 0 && dy == 0) continue;
-      final t = ((tap.longitude - p1.longitude) * dx +
+      final t =
+          ((tap.longitude - p1.longitude) * dx +
               (tap.latitude - p1.latitude) * dy) /
           (dx * dx + dy * dy);
       final closest = LatLng(
@@ -484,14 +519,18 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
             DropdownButtonHideUnderline(
               child: DropdownButton<RouteData>(
                 value: selectedRoute,
-                icon: const Icon(Icons.keyboard_arrow_down,
-                    color: Colors.white),
+                icon: const Icon(
+                  Icons.keyboard_arrow_down,
+                  color: Colors.white,
+                ),
                 dropdownColor: Colors.blueAccent,
                 items: allRouteData.map((route) {
                   return DropdownMenuItem<RouteData>(
                     value: route,
-                    child: Text(route.name,
-                        style: const TextStyle(color: Colors.white)),
+                    child: Text(
+                      route.name,
+                      style: const TextStyle(color: Colors.white),
+                    ),
                   );
                 }).toList(),
                 onChanged: (value) {
@@ -528,8 +567,9 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
                         points: route.lanes[i],
                         color: isHighlighted
                             ? route.laneColors[i]
-                            : route.laneColors[i]
-                                .withAlpha((0.25 * 255).toInt()),
+                            : route.laneColors[i].withAlpha(
+                                (0.25 * 255).toInt(),
+                              ),
                         strokeWidth: isHighlighted ? 6 : 4,
                         borderColor: Colors.black,
                         borderStrokeWidth: 2,
@@ -538,24 +578,27 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
                   }).toList(),
                 ),
 
-              // Vehicle Marker
+              // Vehicle marker (Si Mark... TAHIMIK LANG~)
               if (vehiclePosition != null)
                 MarkerLayer(
-                  markers: [
-                    Marker(
-                      point: vehiclePosition!,
+                  markers: vehicles.entries.map((entry) {
+                    final id = entry.key;
+                    final pos = entry.value;
+
+                    return Marker(
+                      point: pos,
                       width: 50,
                       height: 50,
-                      child: const Icon(
+                      child: Icon(
                         Icons.directions_bus,
-                        color: Colors.green,
+                        color: id == vehicleId ? Colors.green : Colors.blue,
                         size: 40,
                       ),
-                    ),
-                  ],
+                    );
+                  }).toList(),
                 ),
 
-              // ===== Optional: Show last sent coords =====
+              // Last sent coords
               if (transmit)
                 Positioned(
                   bottom: 20,
@@ -601,3 +644,4 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
     );
   }
 }
+

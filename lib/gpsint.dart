@@ -3,6 +3,11 @@ import 'package:geolocator/geolocator.dart';
 import 'package:web_socket_channel/io.dart';
 import 'dart:async';
 
+// zis is lowk redundant lol 
+// but it's a good reference for the driver transmitter part of the app, so imma keep it here for now
+// plus I plan on doing upgrades in the future, so might as well keep it separate for now
+// this is probably gonna be used for the driver + passenger app, since the driver will be sending coordinates and the passenger will be receiving them
+
 class DriverTransmitter extends StatefulWidget {
   final String serverUrl; // ADD WEBSOCKET SERVER HEREEEEE
   const DriverTransmitter({super.key, required this.serverUrl});
