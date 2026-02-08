@@ -5,6 +5,8 @@ import 'package:geolocator/geolocator.dart';
 import 'routes.dart';
 import 'dart:async';
 import 'package:web_socket_channel/io.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 
 //CHANGE IP ON LINE 81
 
@@ -18,8 +20,7 @@ class TestMap extends StatefulWidget {
 class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
   final MapController _mapController = MapController();
   final Map<String, LatLng> vehicles = {};
-  final String vehicleId =
-      "Test Unit PANEL"; // LOL CHANGE THIS TO VEHICLE ID OR SOMETHING IN THE FUTURE
+  String vehicleId = ''; // persistent per-install UUID (populated at startup)
   LatLng? vehiclePosition;
   late RouteData selectedRoute;
 
@@ -43,7 +44,6 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
   void initState() {
     super.initState();
     vehiclePosition = LatLng(13.9, 121.2);
-    vehicles[vehicleId] = vehiclePosition!; 
 
     if (allRouteData.isNotEmpty) {
       selectedRoute = allRouteData.first;
@@ -64,10 +64,24 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
       CurvedAnimation(parent: _overlayController, curve: Curves.easeInOut),
     );
 
-    _startGpsUpdates();
+    // Initialize persistent ID, then start GPS and websocket so sends use the correct ID
+    _initVehicleId().then((_) {
+      _startGpsUpdates();
+      if (transmit) _connectWebSocket();
+    });
+  }
 
-    // CONNECT TO WEBSOCKET
-    if (transmit) _connectWebSocket();
+  Future<void> _initVehicleId() async {
+    final prefs = await SharedPreferences.getInstance();
+    var id = prefs.getString('vehicle_id');
+    if (id == null || id.isEmpty) {
+      id = const Uuid().v4();
+      await prefs.setString('vehicle_id', id);
+    }
+    setState(() {
+      vehicleId = id!;
+      vehicles[vehicleId] = vehiclePosition ?? LatLng(13.9, 121.2);
+    });
   }
 
   @override
