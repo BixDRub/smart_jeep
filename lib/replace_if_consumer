@@ -272,6 +272,8 @@ import 'package:geolocator/geolocator.dart';
 import 'routes.dart';
 import 'dart:async';
 import 'package:web_socket_channel/io.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 
 //CHANGE IP ON LINE 81
 
@@ -285,8 +287,7 @@ class TestMap extends StatefulWidget {
 class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
   final MapController _mapController = MapController();
   final Map<String, LatLng> vehicles = {};
-  final String vehicleId =
-      "I am not a jeep (jk)"; // LOL CHANGE THIS TO VEHICLE ID OR SOMETHING IN THE FUTURE
+  String vehicleId = ''; // persistent per-install UUID (populated at startup)
   LatLng? vehiclePosition;
   late RouteData selectedRoute;
 
@@ -309,7 +310,7 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    vehicles[vehicleId] = vehiclePosition ?? LatLng(13.9, 121.2); // Default position if GPS is not available
+    vehiclePosition = LatLng(13.9, 121.2);
 
     if (allRouteData.isNotEmpty) {
       selectedRoute = allRouteData.first;
@@ -330,10 +331,24 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
       CurvedAnimation(parent: _overlayController, curve: Curves.easeInOut),
     );
 
-    _startGpsUpdates();
+    // Initialize persistent ID, then start GPS and websocket so sends use the correct ID
+    _initVehicleId().then((_) {
+      _startGpsUpdates();
+      if (transmit) _connectWebSocket();
+    });
+  }
 
-    // CONNECT TO WEBSOCKET
-    if (transmit) _connectWebSocket();
+  Future<void> _initVehicleId() async {
+    final prefs = await SharedPreferences.getInstance();
+    var id = prefs.getString('vehicle_id');
+    if (id == null || id.isEmpty) {
+      id = const Uuid().v4();
+      await prefs.setString('vehicle_id', id);
+    }
+    setState(() {
+      vehicleId = id!;
+      vehicles[vehicleId] = vehiclePosition ?? LatLng(13.9, 121.2);
+    });
   }
 
   @override
@@ -401,7 +416,10 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
           ),
         ).listen((Position pos) {
           final newPos = LatLng(pos.latitude, pos.longitude);
-          setState(() => vehiclePosition = newPos);
+          setState(() {
+            vehiclePosition = newPos;
+            vehicles[vehicleId] = newPos;
+          });
           if (!_hasCenteredOnce) {
             _mapController.move(newPos, 16);
             _hasCenteredOnce = true;
@@ -579,24 +597,23 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
                 ),
 
               // Vehicle marker (Si Mark... TAHIMIK LANG~)
-              if (vehiclePosition != null)
-                MarkerLayer(
-                  markers: vehicles.entries.map((entry) {
-                    final id = entry.key;
-                    final pos = entry.value;
+              MarkerLayer(
+                markers: vehicles.entries.map((entry) {
+                  final id = entry.key;
+                  final pos = entry.value;
 
-                    return Marker(
-                      point: pos,
-                      width: 50,
-                      height: 50,
-                      child: Icon(
-                        Icons.directions_bus,
-                        color: id == vehicleId ? Colors.green : Colors.blue,
-                        size: 40,
-                      ),
-                    );
-                  }).toList(),
-                ),
+                  return Marker(
+                    point: pos,
+                    width: 50,
+                    height: 50,
+                    child: Icon(
+                      Icons.directions_bus,
+                      color: id == vehicleId ? Colors.green : Colors.blue,
+                      size: 40,
+                    ),
+                  );
+                }).toList(),
+              ),
 
               // Last sent coords
               if (transmit)
@@ -644,4 +661,3 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
     );
   }
 }
-

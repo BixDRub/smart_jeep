@@ -1,14 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:geolocator/geolocator.dart';
-import 'routes.dart';
-import 'dart:async';
-import 'package:web_socket_channel/io.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:uuid/uuid.dart';
 
-//CHANGE IP ON LINE 81
+// Routes
+import 'routes.dart';
 
 class TestMap extends StatefulWidget {
   const TestMap({super.key});
@@ -17,246 +12,48 @@ class TestMap extends StatefulWidget {
   State<TestMap> createState() => _TestMapState();
 }
 
-class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
+class _TestMapState extends State<TestMap> {
   final MapController _mapController = MapController();
-  final Map<String, LatLng> vehicles = {};
-  String vehicleId = ''; // persistent per-install UUID (populated at startup)
+
+  // Map boundaries
+  final LatLng swBound = const LatLng(13.0, 120.6);
+  final LatLng neBound = const LatLng(14.2, 121.5);
+
+  // Vehicle position (simulated GPS)
   LatLng? vehiclePosition;
+
+  // Currently selected route (for dropdown + vehicle)
   late RouteData selectedRoute;
-
-  // Haylayt route
-  String? highlightedRouteName;
-
-  // Animasyon darku daa
-  late AnimationController _overlayController;
-  late Animation<double> _overlayAlpha;
-
-  StreamSubscription<Position>? positionStream;
-
-  // TRANSMITTER
-  IOWebSocketChannel? channel;
-  String lastSent = "No coordinates sent yet";
-  bool transmit = true;
-  bool _hasCenteredOnce = false;
-  DateTime _lastSentTime = DateTime.fromMillisecondsSinceEpoch(0);
 
   @override
   void initState() {
     super.initState();
-    vehiclePosition = LatLng(13.9, 121.2);
 
-    if (allRouteData.isNotEmpty) {
-      selectedRoute = allRouteData.first;
-    } else {
-      selectedRoute = RouteData(
-        name: "Default",
-        coordinates: [LatLng(13.9, 121.2)],
-        laneColors: [Colors.blue, Colors.orange],
-      );
+    // Default route
+    selectedRoute = allRouteData.first;
+
+    simulateVehicleMovement();
+  }
+
+  // Simulate vehicle movement along selected route
+  void simulateVehicleMovement() async {
+    for (final point in selectedRoute.coordinates) {
+      await Future.delayed(const Duration(seconds: 2));
+      if (!mounted) return;
+
+      setState(() {
+        vehiclePosition = point;
+      });
     }
-
-    _overlayController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
-    );
-
-    _overlayAlpha = Tween<double>(begin: 0.0, end: 0.25).animate(
-      CurvedAnimation(parent: _overlayController, curve: Curves.easeInOut),
-    );
-
-    // Initialize persistent ID, then start GPS and websocket so sends use the correct ID
-    _initVehicleId().then((_) {
-      _startGpsUpdates();
-      if (transmit) _connectWebSocket();
-    });
   }
 
-  Future<void> _initVehicleId() async {
-    final prefs = await SharedPreferences.getInstance();
-    var id = prefs.getString('vehicle_id');
-    if (id == null || id.isEmpty) {
-      id = const Uuid().v4();
-      await prefs.setString('vehicle_id', id);
-    }
-    setState(() {
-      vehicleId = id!;
-      vehicles[vehicleId] = vehiclePosition ?? LatLng(13.9, 121.2);
-    });
-  }
-
-  @override
-  void dispose() {
-    _overlayController.dispose();
-    positionStream?.cancel();
-    channel?.sink.close();
-    super.dispose();
-  }
-
-  // Websocket SERVERRR
-  void _connectWebSocket() {
-    const serverUrl =
-        'wss://transitlink.onrender.com'; //HEREEEEEEEEEEEEEEEEEEEEEEEEEE
-    channel = IOWebSocketChannel.connect(serverUrl);
-
-    channel?.stream.listen(
-      (message) {
-        final parts = message.toString().split(",");
-
-        if (parts.length == 3) {
-          final id = parts[0];
-          final lat = double.tryParse(parts[1]);
-          final lng = double.tryParse(parts[2]);
-
-          if (lat != null && lng != null) {
-            setState(() {
-              vehicles[id] = LatLng(lat, lng);
-            });
-          }
-        }
-      },
-      onError: (error) {
-        debugPrint("WebSocket error: $error");
-      },
-      onDone: () {
-        debugPrint("WebSocket closed");
-      },
-    );
-  }
-
-  // START GPS UPDATES
-  void _startGpsUpdates() 
-  async {
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      debugPrint("GPS is disabled.");
-      return;
-      
-    }
-
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) return;
-    }
-    if (permission == LocationPermission.deniedForever) return;
-
-    // CONTINUE TO UPDATE
-    positionStream =
-        Geolocator.getPositionStream(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.best,
-            distanceFilter: 5,
-          ),
-        ).listen((Position pos) {
-          final newPos = LatLng(pos.latitude, pos.longitude);
-          setState(() {
-            vehiclePosition = newPos;
-            vehicles[vehicleId] = newPos;
-          });
-          if (!_hasCenteredOnce) {
-            _mapController.move(newPos, 16);
-            _hasCenteredOnce = true;
-          }
-
-          // SEND COORDS BLYAD SUKA
-          final now = DateTime.now();
-          if (transmit &&
-              channel != null &&
-              now.difference(_lastSentTime).inSeconds >= 3) {
-            final coords = "$vehicleId,${pos.latitude},${pos.longitude}";
-            channel?.sink.add(coords);
-            setState(() => lastSent = coords);
-            _lastSentTime = now;
-            debugPrint("Sent: $coords");
-          }
-        });
-  }
-
+  // Switch route from dropdown
   void switchRoute(RouteData route) {
     setState(() {
       selectedRoute = route;
-      highlightedRouteName = null;
-      _overlayController.reverse();
-      if (vehiclePosition != null) _mapController.move(vehiclePosition!, 13);
-    });
-  }
-
-  bool _isNearPolyline(
-    LatLng tap,
-    List<LatLng> polyline, {
-    double threshold = 0.0006,
-  }) {
-    for (int i = 0; i < polyline.length - 1; i++) {
-      final p1 = polyline[i];
-      final p2 = polyline[i + 1];
-      final dx = p2.longitude - p1.longitude;
-      final dy = p2.latitude - p1.latitude;
-      if (dx == 0 && dy == 0) continue;
-      final t =
-          ((tap.longitude - p1.longitude) * dx +
-              (tap.latitude - p1.latitude) * dy) /
-          (dx * dx + dy * dy);
-      final closest = LatLng(
-        p1.latitude + (dy * t).clamp(0, 1),
-        p1.longitude + (dx * t).clamp(0, 1),
-      );
-      final dist = Distance().as(LengthUnit.Kilometer, tap, closest);
-      if (dist < threshold) return true;
-    }
-    return false;
-  }
-
-  void _handleTap(LatLng tap) {
-    if (allRouteData.isEmpty) return;
-
-    final nearbyRoutes = allRouteData.where((route) {
-      for (final lane in route.lanes) {
-        if (_isNearPolyline(tap, lane)) return true;
-      }
-      return false;
-    }).toList();
-
-    if (nearbyRoutes.isEmpty) {
-      setState(() {
-        highlightedRouteName = null;
-        _overlayController.reverse();
-      });
-      return;
-    }
-
-    if (nearbyRoutes.length == 1) {
-      setState(() {
-        highlightedRouteName = nearbyRoutes.first.name;
-        _overlayController.forward();
-      });
-    } else {
-      showModalBottomSheet(
-        context: context,
-        builder: (_) {
-          return Column(
-            mainAxisSize: MainAxisSize.min,
-            children: nearbyRoutes.map((route) {
-              return ListTile(
-                title: Text(route.name),
-                onTap: () {
-                  setState(() {
-                    highlightedRouteName = route.name;
-                    _overlayController.forward();
-                  });
-                  Navigator.pop(context);
-                },
-              );
-            }).toList(),
-          );
-        },
-      );
-    }
-  }
-
-  void _unselectRoute() {
-    setState(() {
-      highlightedRouteName = null;
-      _overlayController.reverse();
+      vehiclePosition = null;
+      _mapController.move(route.coordinates.first, 13);
+      simulateVehicleMovement();
     });
   }
 
@@ -264,133 +61,133 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("TransitLink"),
+        title: const Text("TransitLink — DEV MAP"),
         actions: [
-          if (allRouteData.isNotEmpty)
-            DropdownButtonHideUnderline(
-              child: DropdownButton<RouteData>(
-                value: selectedRoute,
-                icon: const Icon(
-                  Icons.keyboard_arrow_down,
-                  color: Colors.white,
-                ),
-                dropdownColor: Colors.blueAccent,
-                items: allRouteData.map((route) {
-                  return DropdownMenuItem<RouteData>(
-                    value: route,
-                    child: Text(
-                      route.name,
-                      style: const TextStyle(color: Colors.white),
-                    ),
-                  );
-                }).toList(),
-                onChanged: (value) {
-                  if (value != null) switchRoute(value);
-                },
-              ),
+          DropdownButtonHideUnderline(
+            child: DropdownButton<RouteData>(
+              value: selectedRoute,
+              icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white),
+              dropdownColor: Colors.blueAccent,
+              items: allRouteData.map((route) {
+                return DropdownMenuItem<RouteData>(
+                  value: route,
+                  child: Text(
+                    route.name,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                );
+              }).toList(),
+              onChanged: (value) {
+                if (value != null) switchRoute(value);
+              },
             ),
+          ),
         ],
       ),
-      body: Stack(
+
+      body: FlutterMap(
+        mapController: _mapController,
+        options: MapOptions(
+          initialCenter: selectedRoute.coordinates.first,
+          initialZoom: 13,
+          maxZoom: 19,
+
+          // DEV TAP: print coordinates
+          onTap: (tapPos, latlng) {
+            debugPrint(
+              "LatLng(${latlng.latitude}, ${latlng.longitude}),",
+            );
+          },
+
+          onPositionChanged: (position, _) {
+            final center = position.center;
+            double lat = center.latitude;
+            double lng = center.longitude;
+
+            if (lat < swBound.latitude) lat = swBound.latitude;
+            if (lat > neBound.latitude) lat = neBound.latitude;
+            if (lng < swBound.longitude) lng = swBound.longitude;
+            if (lng > neBound.longitude) lng = neBound.longitude;
+
+            if (lat != center.latitude || lng != center.longitude) {
+              _mapController.move(LatLng(lat, lng), position.zoom);
+            }
+          },
+        ),
+
         children: [
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter: LatLng(13.9, 121.2),
-              initialZoom: 13,
-              maxZoom: 19,
-              onTap: (_, latlng) => _handleTap(latlng),
-            ),
-            children: [
-              TileLayer(
-                urlTemplate: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-                userAgentPackageName: 'com.smart_jeep.capstone',
-              ),
+          // Base map
+          TileLayer(
+            urlTemplate: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+            userAgentPackageName: 'com.smart_jeep.capstone',
+          ),
 
-              // Haylayt routes
-              if (allRouteData.isNotEmpty)
-                PolylineLayer(
-                  polylines: allRouteData.expand((route) {
-                    final isHighlighted = route.name == highlightedRouteName;
+          // ALL ROUTES 
+          PolylineLayer(
+            polylines: allRouteData.expand((route) {
+              return List.generate(route.lanes.length, (i) {
+                return Polyline(
+                  points: route.lanes[i],
+                  color: route.laneColors[i],
+                  strokeWidth: 4,
+                  borderColor: Colors.black,
+                  borderStrokeWidth: 2,
+                );
+              });
+            }).toList(),
+          ),
 
-                    return List.generate(route.lanes.length, (i) {
-                      return Polyline(
-                        points: route.lanes[i],
-                        color: isHighlighted
-                            ? route.laneColors[i]
-                            : route.laneColors[i].withAlpha(
-                                (0.25 * 255).toInt(),
-                              ),
-                        strokeWidth: isHighlighted ? 6 : 4,
-                        borderColor: Colors.black,
-                        borderStrokeWidth: 2,
-                      );
-                    });
-                  }).toList(),
+          //  Vehicle marker (only on selected route)
+          if (vehiclePosition != null)
+            MarkerLayer(
+              markers: [
+                Marker(
+                  point: vehiclePosition!,
+                  width: 40,
+                  height: 40,
+                  child: const Icon(
+                    Icons.directions_bus,
+                    color: Colors.green,
+                    size: 36,
+                  ),
                 ),
+              ],
+            ),
 
-              // Vehicle marker (Si Mark... TAHIMIK LANG~)
-              MarkerLayer(
-                markers: vehicles.entries.map((entry) {
-                  final id = entry.key;
-                  final pos = entry.value;
-
-                  return Marker(
-                    point: pos,
-                    width: 50,
-                    height: 50,
-                    child: Icon(
-                      Icons.directions_bus,
-                      color: id == vehicleId ? Colors.green : Colors.blue,
-                      size: 40,
-                    ),
-                  );
-                }).toList(),
-              ),
-
-              // Last sent coords
-              if (transmit)
-                Positioned(
-                  bottom: 20,
-                  left: 20,
-                  child: Container(
-                    padding: const EdgeInsets.all(8),
-                    color: Colors.white70,
-                    child: Text(
-                      "Last sent: $lastSent",
-                      style: const TextStyle(fontWeight: FontWeight.bold),
+          //  Route label (selected route only)
+          MarkerLayer(
+            markers: [
+              Marker(
+                point: selectedRoute
+                    .coordinates[(selectedRoute.coordinates.length / 2).floor()],
+                width: 140,
+                height: 30,
+                child: Container(
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: const Color.fromRGBO(255, 255, 255, 0.85),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: Colors.black54),
+                  ),
+                  child: Text(
+                    selectedRoute.name,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
+              ),
             ],
-          ),
-
-          // Darku oberlayu
-          AnimatedBuilder(
-            animation: _overlayController,
-            builder: (_, _) {
-              return IgnorePointer(
-                ignoring: true,
-                child: Container(
-                  color: highlightedRouteName == null
-                      ? Colors.transparent
-                      : Colors.black.withAlpha(
-                          (_overlayAlpha.value * 255).toInt(),
-                        ),
-                ),
-              );
-            },
           ),
         ],
       ),
-      floatingActionButton: highlightedRouteName != null
-          ? FloatingActionButton(
-              backgroundColor: Colors.redAccent,
-              onPressed: _unselectRoute,
-              tooltip: "Unselect Route",
-              child: const Icon(Icons.close),
-            )
-          : null,
     );
   }
 }
+
+
+
+
+
+
