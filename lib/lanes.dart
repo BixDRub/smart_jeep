@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:latlong2/latlong.dart';
+//this entire thing is for routes.dart, and idk how tf it works
 
 /// Offset an entire polyline by X meters (positive = right, negative = left)
 List<LatLng> offsetPolyline(List<LatLng> points, double offsetMeters) {
@@ -47,21 +48,3 @@ List<List<LatLng>> buildTwoLanes(List<LatLng> baseRoute, double laneWidthMeters)
   ];
 }
 
-// Build N parallel lanes
-List<List<LatLng>> buildLanes(
-  List<LatLng> baseRoute,
-  int laneCount, {
-  double spacingMeters = 4.0,
-}) {
-  final List<List<LatLng>> lanes = [];
-
-  // Zero-centered offset distribution
-  int middle = laneCount ~/ 2;
-
-  for (int i = 0; i < laneCount; i++) {
-    double offset = (i - middle) * spacingMeters;
-    lanes.add(offsetPolyline(baseRoute, offset));
-  }
-
-  return lanes;
-}

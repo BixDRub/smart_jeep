@@ -17,10 +17,12 @@ class TestMap extends StatefulWidget {
   State<TestMap> createState() => _TestMapState();
 }
 
-class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
+class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin { //the beginning
   final MapController _mapController = MapController();
   final Map<String, LatLng> vehicles = {};
-  String vehicleId = ''; // persistent per-install UUID (populated at startup)
+  final Map<String, String> vehicleRoles = {}; // stores role for each vehicle
+  String vehicleId = ''; // persistent per-install UUID 
+  String userRole = 'driver'; // 'driver' or 'commuter'
   LatLng? vehiclePosition;
   late RouteData selectedRoute;
 
@@ -31,37 +33,37 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
   late AnimationController _overlayController;
   late Animation<double> _overlayAlpha;
 
-  StreamSubscription<Position>? positionStream;
+  StreamSubscription<Position>? positionStream; ///this is to listen for the updates
 
   // TRANSMITTER
-  IOWebSocketChannel? channel;
+  IOWebSocketChannel? channel; //this is to send the coordinates to the server
   String lastSent = "No coordinates sent yet";
   bool transmit = true;
-  bool _hasCenteredOnce = false;
+  bool _hasCenteredOnce = false; //this is to make sure the map ONLY centers on the first update
   DateTime _lastSentTime = DateTime.fromMillisecondsSinceEpoch(0);
 
   @override
-  void initState() {
+  void initState() { //this is the first thing that runs when the widget is created
     super.initState();
-    vehiclePosition = LatLng(13.9, 121.2);
+    vehiclePosition = LatLng(13.9, 121.2); //this is a placeholder position (somewhere in the Philippines hehe)
 
-    if (allRouteData.isNotEmpty) {
-      selectedRoute = allRouteData.first;
+    if (allRouteData.isNotEmpty) { //if we have route data, select the first one by default
+      selectedRoute = allRouteData.first; 
     } else {
-      selectedRoute = RouteData(
+      selectedRoute = RouteData( //if no route data, create a dummy one 
         name: "Default",
         coordinates: [LatLng(13.9, 121.2)],
         laneColors: [Colors.blue, Colors.orange],
       );
     }
 
-    _overlayController = AnimationController(
+    _overlayController = AnimationController( //this is for the dark overlay when u select a route
       vsync: this,
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 300), //smooth transition
     );
 
-    _overlayAlpha = Tween<double>(begin: 0.0, end: 0.25).animate(
-      CurvedAnimation(parent: _overlayController, curve: Curves.easeInOut),
+    _overlayAlpha = Tween<double>(begin: 0.0, end: 0.25).animate( //this is the animation for the overlay's opacity
+      CurvedAnimation(parent: _overlayController, curve: Curves.easeInOut), //SMOOOOOOOTH
     );
 
     // Initialize persistent ID, then start GPS and websocket so sends use the correct ID
@@ -71,22 +73,72 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
     });
   }
 
-  Future<void> _initVehicleId() async {
+  Future<void> _initVehicleId() async { //even more persisstent ID
     final prefs = await SharedPreferences.getInstance();
     var id = prefs.getString('vehicle_id');
-    if (id == null || id.isEmpty) {
+    bool isFirstTime = false;
+    if (id == null || id.isEmpty) { //if no ID stored, generate a new one 
       id = const Uuid().v4();
       await prefs.setString('vehicle_id', id);
+      isFirstTime = true;
     }
+    
+    // Load user role
+    var role = prefs.getString('user_role');
+    if (role == null || role.isEmpty) {
+      role = 'driver'; // default to driver
+      await prefs.setString('user_role', role);
+    }
+    
     setState(() {
       vehicleId = id!;
+      userRole = role!;
       vehicles[vehicleId] = vehiclePosition ?? LatLng(13.9, 121.2);
+      vehicleRoles[vehicleId] = userRole;
     });
+    
+    // Show role selection dialog on first launch
+    if (isFirstTime && mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => AlertDialog(
+          title: const Text("Select Your Role"),
+          content: const Text("Are you a driver or a commuter?"),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setString('user_role', 'driver');
+                setState(() {
+                  userRole = 'driver';
+                  vehicleRoles[vehicleId] = 'driver';
+                });
+                if (mounted) Navigator.pop(context);
+              },
+              child: const Text("Driver"),
+            ),
+            TextButton(
+              onPressed: () async {
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setString('user_role', 'commuter');
+                setState(() {
+                  userRole = 'commuter';
+                  vehicleRoles[vehicleId] = 'commuter';
+                });
+                if (mounted) Navigator.pop(context);
+              },
+              child: const Text("Commuter"),
+            ),
+          ],
+        ),
+      );
+    }
   }
 
   @override
-  void dispose() {
-    _overlayController.dispose();
+  void dispose() { //clean up resources when the widget is removed
+    _overlayController.dispose(); //remove der animation controller
     positionStream?.cancel();
     channel?.sink.close();
     super.dispose();
@@ -98,23 +150,25 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
         'wss://transitlink.onrender.com'; //HEREEEEEEEEEEEEEEEEEEEEEEEEEE
     channel = IOWebSocketChannel.connect(serverUrl);
 
-    channel?.stream.listen(
+    channel?.stream.listen( //listen for messages from ze server
       (message) {
         final parts = message.toString().split(",");
 
-        if (parts.length == 3) {
+        if (parts.length >= 3) { //expecting "id,lat,lng" or "id,lat,lng,role"
           final id = parts[0];
-          final lat = double.tryParse(parts[1]);
+          final lat = double.tryParse(parts[1]); //parsing 
           final lng = double.tryParse(parts[2]);
+          final role = parts.length >= 4 ? parts[3] : 'driver'; // default to driver if not provided
 
-          if (lat != null && lng != null) {
+          if (lat != null && lng != null) { //successful parsibg = update ze location
             setState(() {
               vehicles[id] = LatLng(lat, lng);
+              vehicleRoles[id] = role;
             });
           }
         }
       },
-      onError: (error) {
+      onError: (error) { //if websocket got an error. Debugging onle
         debugPrint("WebSocket error: $error");
       },
       onDone: () {
@@ -124,7 +178,7 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
   }
 
   // START GPS UPDATES
-  void _startGpsUpdates() 
+  void _startGpsUpdates() //This second listening thingy is for the device only. The othe rone is for the server
   async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
@@ -133,7 +187,7 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
       
     }
 
-    LocationPermission permission = await Geolocator.checkPermission();
+    LocationPermission permission = await Geolocator.checkPermission(); // GET DA PERMISSION (NEED PRECISE)
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) return;
@@ -141,7 +195,7 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
     if (permission == LocationPermission.deniedForever) return;
 
     // CONTINUE TO UPDATE
-    positionStream =
+    positionStream = //this part is to avoid overloading older phones
         Geolocator.getPositionStream(
           locationSettings: const LocationSettings(
             accuracy: LocationAccuracy.best,
@@ -159,11 +213,11 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
           }
 
           // SEND COORDS BLYAD SUKA
-          final now = DateTime.now();
+          final now = DateTime.now(); // throttle the sending to once every 3 seconds to avoid spamming the server 
           if (transmit &&
               channel != null &&
               now.difference(_lastSentTime).inSeconds >= 3) {
-            final coords = "$vehicleId,${pos.latitude},${pos.longitude}";
+            final coords = "$vehicleId,${pos.latitude},${pos.longitude},$userRole";
             channel?.sink.add(coords);
             setState(() => lastSent = coords);
             _lastSentTime = now;
@@ -172,7 +226,7 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
         });
   }
 
-  void switchRoute(RouteData route) {
+  void switchRoute(RouteData route) { //this is for when u select a route from the dropdown
     setState(() {
       selectedRoute = route;
       highlightedRouteName = null;
@@ -181,12 +235,12 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
     });
   }
 
-  bool _isNearPolyline(
+  bool _isNearPolyline( //tap detection
     LatLng tap,
     List<LatLng> polyline, {
-    double threshold = 0.0006,
+    double threshold = 0.0000006,
   }) {
-    for (int i = 0; i < polyline.length - 1; i++) {
+    for (int i = 0; i < polyline.length - 1; i++) { //polyline stuff. Just checks if the tap is close. I almost died tryna make this work
       final p1 = polyline[i];
       final p2 = polyline[i + 1];
       final dx = p2.longitude - p1.longitude;
@@ -211,7 +265,7 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
 
     final nearbyRoutes = allRouteData.where((route) {
       for (final lane in route.lanes) {
-        if (_isNearPolyline(tap, lane)) return true;
+        if (_isNearPolyline(tap, lane, threshold: 0.00000015)) return true;
       }
       return false;
     }).toList();
@@ -260,12 +314,80 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
     });
   }
 
+  void _toggleRole() async {
+    final newRole = userRole == 'driver' ? 'commuter' : 'driver';
+  
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('user_role', newRole);
+    setState(() {
+      userRole = newRole;
+      vehicleRoles[vehicleId] = newRole;
+    });
+    
+    // new update based on role
+    if (transmit && channel != null && vehiclePosition != null) {
+      final coords = "$vehicleId,${vehiclePosition!.latitude},${vehiclePosition!.longitude},$userRole";
+      channel?.sink.add(coords);
+      setState(() => lastSent = coords);
+      _lastSentTime = DateTime.now();
+      debugPrint("Sent role update: $coords");
+    }
+  }
+
+  bool _shouldShowVehicle(String vehicleId) {
+    if (vehicleId == this.vehicleId) return true; // always show yourself
+    
+    final otherVehicleRole = vehicleRoles[vehicleId];
+    
+    if (userRole == 'driver') {
+      // Drivers see all drivers and all commuters
+      return true;
+    } else {
+      // Commuters only see drivers
+      return otherVehicleRole == 'driver';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text("TransitLink"),
         actions: [
+          // Role toggle button
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0),
+            child: Center(
+              child: GestureDetector(
+                onTap: _toggleRole,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.black,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        userRole == 'driver' ? Icons.directions_bus : Icons.person,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        userRole == 'driver' ? 'Driver' : 'Commuter',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
           if (allRouteData.isNotEmpty)
             DropdownButtonHideUnderline(
               child: DropdownButton<RouteData>(
@@ -308,12 +430,12 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
               ),
 
               // Haylayt routes
-              if (allRouteData.isNotEmpty)
+              if (allRouteData.isNotEmpty) // if function is to help the thing not break when we got no route data. Idk why I added this because we always have route data 
                 PolylineLayer(
                   polylines: allRouteData.expand((route) {
                     final isHighlighted = route.name == highlightedRouteName;
 
-                    return List.generate(route.lanes.length, (i) {
+                    return List.generate(route.lanes.length, (i) { 
                       return Polyline(
                         points: route.lanes[i],
                         color: isHighlighted
@@ -330,17 +452,22 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
                 ),
 
               // Vehicle marker (Si Mark... TAHIMIK LANG~)
-              MarkerLayer(
-                markers: vehicles.entries.map((entry) {
+              MarkerLayer( //this is the thing that marks the vehicle position)
+                markers: vehicles.entries
+                    .where((entry) => _shouldShowVehicle(entry.key))
+                    .map((entry) {
                   final id = entry.key;
                   final pos = entry.value;
+                  final role = vehicleRoles[id] ?? 'driver';
 
                   return Marker(
                     point: pos,
                     width: 50,
                     height: 50,
                     child: Icon(
-                      Icons.directions_bus,
+                      role == 'driver'
+                          ? Icons.directions_bus
+                          : Icons.person,
                       color: id == vehicleId ? Colors.green : Colors.blue,
                       size: 40,
                     ),
@@ -349,7 +476,7 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
               ),
 
               // Last sent coords
-              if (transmit)
+              if (transmit) //just for the bottom info box
                 Positioned(
                   bottom: 20,
                   left: 20,
@@ -366,7 +493,7 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
           ),
 
           // Darku oberlayu
-          AnimatedBuilder(
+          AnimatedBuilder( //this is the dark overlay when u select a route
             animation: _overlayController,
             builder: (_, _) {
               return IgnorePointer(
@@ -383,7 +510,7 @@ class _TestMapState extends State<TestMap> with SingleTickerProviderStateMixin {
           ),
         ],
       ),
-      floatingActionButton: highlightedRouteName != null
+      floatingActionButton: highlightedRouteName != null //show unselect button
           ? FloatingActionButton(
               backgroundColor: Colors.redAccent,
               onPressed: _unselectRoute,
