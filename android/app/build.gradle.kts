@@ -8,7 +8,6 @@ plugins {
 android {
     namespace = "com.example.smart_jeep"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = "25.2.9519653"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

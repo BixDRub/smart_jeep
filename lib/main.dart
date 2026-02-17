@@ -14,7 +14,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'GPS Test',
+      title: 'TransitLink',
       home: const IntroScreen(),
       routes: {
         '/home': (context) => const TestMap(),

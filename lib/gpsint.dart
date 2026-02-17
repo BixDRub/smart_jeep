@@ -7,6 +7,7 @@ import 'dart:async';
 // but it's a good reference for the driver transmitter part of the app, so imma keep it here for now
 // plus I plan on doing upgrades in the future, so might as well keep it separate for now
 // this is probably gonna be used for the driver + passenger app, since the driver will be sending coordinates and the passenger will be receiving them
+//nvm I didn't use it
 
 class DriverTransmitter extends StatefulWidget {
   final String serverUrl; // ADD WEBSOCKET SERVER HEREEEEE
