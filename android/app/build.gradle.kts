@@ -6,9 +6,9 @@ plugins {
 }
 
 android {
-    namespace = "com.example.transitlink"
+    namespace = "com.example.smart_jeep"
     compileSdk = flutter.compileSdkVersion
-     ndkVersion = "27.0.12077973"
+
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
